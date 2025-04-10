@@ -1,84 +1,280 @@
-from typing import List, Union, Tuple
+"""
+Financial mathematical utilities module.
+
+This module provides functions for calculating various technical indicators
+and statistical measures commonly used in financial analysis, such as moving
+averages, momentum indicators, and volatility measures.
+"""
+
+from typing import List, Tuple, Union, cast
 import numpy as np
-from .types import Price
 import pandas as pd
+from .types import Price
 
-def calculate_sma(prices: List[Price], period: int) -> List[float]:
-    """Calculate Simple Moving Average"""
-    if len(prices) < period:
-        return []
-    return np.convolve(prices, np.ones(period)/period, mode='valid').tolist()
+# Type aliases for better readability
+PriceList = List[Price]
+FloatList = List[float]
+BollingerBands = Tuple[FloatList, FloatList, FloatList]
 
-def calculate_ema(prices: List[Price], period: int) -> List[float]:
-    """Calculate Exponential Moving Average"""
-    if len(prices) < period:
-        return []
-    return np.array(prices).ewm(span=period, adjust=False).mean().tolist()
 
-def calculate_rsi(prices: List[Price], period: int = 14) -> List[float]:
-    """Calculate Relative Strength Index"""
-    if len(prices) < period + 1:
+def calculate_sma(prices: PriceList, period: int) -> FloatList:
+    """
+    Calculate Simple Moving Average.
+    
+    The Simple Moving Average (SMA) is the arithmetic mean of a set of prices
+    over a specified period. It is one of the most basic technical indicators
+    used in financial analysis.
+    
+    Args:
+        prices: List of price values
+        period: Number of periods to use for the moving average
+        
+    Returns:
+        List of SMA values. The length of the returned list is less than the
+        input list by (period - 1) elements.
+        
+    Examples:
+        >>> calculate_sma([10, 11, 12, 13, 14], 3)
+        [11.0, 12.0, 13.0]
+    """
+    if not prices or len(prices) < period:
         return []
     
-    deltas = np.diff(prices)
-    seed = deltas[:period+1]
-    up = seed[seed >= 0].sum()/period
-    down = -seed[seed < 0].sum()/period
-    rs = up/down if down != 0 else float('inf')
-    rsi = np.zeros_like(prices)
-    rsi[:period] = 100. - 100./(1. + rs)
+    # Convert to numpy array for efficient calculation
+    prices_array = np.array(prices, dtype=float)
+    sma = np.convolve(prices_array, np.ones(period)/period, mode='valid')
+    
+    # Convert back to list and ensure type safety
+    return cast(FloatList, sma.tolist())
 
-    for i in range(period, len(prices)):
-        delta = deltas[i - 1]
-        if delta > 0:
-            upval = delta
-            downval = 0.
+
+def calculate_ema(prices: PriceList, period: int) -> FloatList:
+    """
+    Calculate Exponential Moving Average.
+    
+    The Exponential Moving Average (EMA) gives more weight to recent prices
+    compared to older prices, making it more responsive to recent price changes
+    than the Simple Moving Average.
+    
+    Args:
+        prices: List of price values
+        period: Number of periods to use for the moving average
+        
+    Returns:
+        List of EMA values with the same length as the input list.
+        
+    Examples:
+        >>> calculate_ema([10, 11, 12, 13, 14], 3)
+        [10.0, 10.5, 11.25, 12.125, 13.0625]
+    """
+    if not prices or len(prices) < period:
+        return []
+    
+    # Convert to pandas Series for efficient calculation
+    prices_series = pd.Series(prices)
+    ema = prices_series.ewm(span=period, adjust=False).mean()
+    
+    # Convert back to list and ensure type safety
+    return cast(FloatList, ema.tolist())
+
+
+def calculate_rsi(prices: PriceList, period: int = 14) -> FloatList:
+    """
+    Calculate Relative Strength Index.
+    
+    The Relative Strength Index (RSI) is a momentum oscillator that measures
+    the speed and magnitude of recent price changes to evaluate overbought or
+    oversold conditions.
+    
+    Args:
+        prices: List of price values
+        period: Number of periods to use for the RSI calculation (default: 14)
+        
+    Returns:
+        List of RSI values with the same length as the input list.
+        Values range from 0 to 100, with values above 70 typically indicating
+        overbought conditions and values below 30 typically indicating oversold
+        conditions.
+        
+    Examples:
+        >>> prices = [10, 10.5, 10.2, 10.8, 11.0, 10.7, 10.9, 11.2, 11.5, 11.3]
+        >>> rsi = calculate_rsi(prices, period=5)
+        >>> rsi[0:5]  # First 5 values
+        [0.0, 0.0, 0.0, 0.0, 0.0]
+    """
+    if not prices or len(prices) < period + 1:
+        return []
+    
+    # Check if all prices are the same (constant prices)
+    if all(abs(p - prices[0]) < 1e-10 for p in prices):
+        # For constant prices, RSI is 50
+        return [50.0] * len(prices)
+    
+    # Convert to numpy array for efficient calculation
+    prices_array = np.array(prices, dtype=float)
+    deltas = np.diff(prices_array)
+    
+    # Separate gains and losses
+    gains = np.where(deltas > 0, deltas, 0)
+    losses = np.where(deltas < 0, -deltas, 0)
+    
+    # Calculate initial averages
+    avg_gain = np.mean(gains[:period])
+    avg_loss = np.mean(losses[:period])
+    
+    # Initialize RSI array
+    rsi = np.zeros_like(prices_array)
+    
+    # Calculate first RSI value
+    if avg_loss == 0:
+        rsi[period] = 100.0
+    else:
+        rs = avg_gain / avg_loss
+        rsi[period] = 100.0 - (100.0 / (1.0 + rs))
+    
+    # Calculate remaining RSI values
+    for i in range(period + 1, len(prices_array)):
+        if deltas[i-1] > 0:
+            upval = deltas[i-1]
+            downval = 0.0
         else:
-            upval = 0.
-            downval = -delta
-
-        up = (up*(period-1) + upval)/period
-        down = (down*(period-1) + downval)/period
-        rs = up/down if down != 0 else float('inf')
-        rsi[i] = 100. - 100./(1. + rs)
+            upval = 0.0
+            downval = -deltas[i-1]
+        
+        # Update averages using smoothing
+        avg_gain = (avg_gain * (period - 1) + upval) / period
+        avg_loss = (avg_loss * (period - 1) + downval) / period
+        
+        # Calculate RSI
+        if avg_loss == 0:
+            rsi[i] = 100.0
+        else:
+            rs = avg_gain / avg_loss
+            rsi[i] = 100.0 - (100.0 / (1.0 + rs))
     
-    return rsi.tolist()
+    # Fill in the first period values (they can't be calculated)
+    rsi[:period] = rsi[period]
+    
+    # Convert back to list and ensure type safety
+    return cast(FloatList, rsi.tolist())
 
-def calculate_bollinger_bands(prices: List[Price], period: int = 20, std_dev: float = 2.0) -> tuple[List[float], List[float], List[float]]:
-    """Calculate Bollinger Bands"""
-    if len(prices) < period:
+
+def calculate_bollinger_bands(
+    prices: PriceList, 
+    period: int = 20, 
+    std_dev: float = 2.0
+) -> BollingerBands:
+    """
+    Calculate Bollinger Bands.
+    
+    Bollinger Bands consist of a middle band (SMA) and upper and lower bands
+    that are standard deviations away from the middle band. They are used to
+    identify volatility and potential overbought/oversold conditions.
+    
+    Args:
+        prices: List of price values
+        period: Number of periods to use for the moving average (default: 20)
+        std_dev: Number of standard deviations for the bands (default: 2.0)
+        
+    Returns:
+        Tuple containing three lists:
+        - Middle band (SMA)
+        - Upper band (SMA + std_dev * standard deviation)
+        - Lower band (SMA - std_dev * standard deviation)
+        
+    Examples:
+        >>> prices = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+        >>> middle, upper, lower = calculate_bollinger_bands(prices, period=5)
+        >>> middle[0]  # First middle band value
+        12.0
+    """
+    if not prices or len(prices) < period:
         return [], [], []
     
+    # Calculate SMA
     sma = calculate_sma(prices, period)
-    std = np.std(prices[-period:])
-    upper_band = [x + (std_dev * std) for x in sma]
-    lower_band = [x - (std_dev * std) for x in sma]
+    if not sma:
+        return [], [], []
     
-    return sma, upper_band, lower_band
+    # Convert to numpy array for efficient calculation
+    prices_array = np.array(prices, dtype=float)
+    
+    # Calculate standard deviation for each period
+    std_values = []
+    for i in range(period - 1, len(prices_array)):
+        std_values.append(np.std(prices_array[i-period+1:i+1]))
+    
+    # Calculate upper and lower bands
+    upper_band = [sma[i] + (std_dev * std_values[i]) for i in range(len(sma))]
+    lower_band = [sma[i] - (std_dev * std_values[i]) for i in range(len(sma))]
+    
+    # Ensure type safety
+    return (
+        cast(FloatList, sma),
+        cast(FloatList, upper_band),
+        cast(FloatList, lower_band)
+    )
 
-def calculate_atr(high: List[Price], low: List[Price], close: List[Price], period: int = 14) -> List[float]:
-    """Calculate Average True Range"""
-    if len(high) < period or len(low) < period or len(close) < period:
+
+def calculate_atr(
+    high: PriceList, 
+    low: PriceList, 
+    close: PriceList, 
+    period: int = 14
+) -> FloatList:
+    """
+    Calculate Average True Range.
+    
+    The Average True Range (ATR) measures market volatility by calculating
+    the average range of price movement over a specified period.
+    
+    Args:
+        high: List of high prices
+        low: List of low prices
+        close: List of closing prices
+        period: Number of periods to use for the ATR calculation (default: 14)
+        
+    Returns:
+        List of ATR values with the same length as the input lists.
+        
+    Examples:
+        >>> high = [10, 11, 12, 13, 14]
+        >>> low = [9, 10, 11, 12, 13]
+        >>> close = [9.5, 10.5, 11.5, 12.5, 13.5]
+        >>> atr = calculate_atr(high, low, close, period=3)
+        >>> atr[0:3]  # First 3 values
+        [1.0, 1.0, 1.0]
+    """
+    if not high or not low or not close or len(high) < period or len(low) < period or len(close) < period:
         return []
     
-    tr = np.zeros_like(high)
-    tr[0] = high[0] - low[0]
+    # Convert to numpy arrays for efficient calculation
+    high_array = np.array(high, dtype=float)
+    low_array = np.array(low, dtype=float)
+    close_array = np.array(close, dtype=float)
     
-    for i in range(1, len(high)):
-        hl = high[i] - low[i]
-        hc = abs(high[i] - close[i-1])
-        lc = abs(low[i] - close[i-1])
+    # Calculate True Range
+    tr = np.zeros_like(high_array)
+    tr[0] = high_array[0] - low_array[0]
+    
+    for i in range(1, len(high_array)):
+        hl = high_array[i] - low_array[i]
+        hc = abs(high_array[i] - close_array[i-1])
+        lc = abs(low_array[i] - close_array[i-1])
         tr[i] = max(hl, hc, lc)
     
+    # Calculate ATR
     atr = np.zeros_like(tr)
     atr[0] = tr[0]
     
     for i in range(1, len(tr)):
         atr[i] = (atr[i-1] * (period-1) + tr[i]) / period
     
-    return atr.tolist()
+    # Convert back to list and ensure type safety
+    return cast(FloatList, atr.tolist())
 
-def calculate_returns(prices: List[Price]) -> List[float]:
+
+def calculate_returns(prices: PriceList) -> FloatList:
     """
     Calculate percentage returns from a list of prices.
     
@@ -102,23 +298,30 @@ def calculate_returns(prices: List[Price]) -> List[float]:
     if not prices or len(prices) < 2:
         return []
     
+    # Convert to numpy array for efficient calculation
+    prices_array = np.array(prices, dtype=float)
+    
+    # Calculate returns with handling for division by zero
     returns = []
-    for i in range(1, len(prices)):
+    for i in range(1, len(prices_array)):
         # Handle division by zero
-        if prices[i-1] == 0:
+        if prices_array[i-1] == 0:
             # If previous price is zero, return infinity for positive current price
             # or negative infinity for negative current price
-            if prices[i] > 0:
+            if prices_array[i] > 0:
                 returns.append(float('inf'))
-            elif prices[i] < 0:
+            elif prices_array[i] < 0:
                 returns.append(float('-inf'))
             else:
                 returns.append(0.0)  # Both prices are zero, return 0% change
         else:
-            returns.append((prices[i] - prices[i-1]) / prices[i-1] * 100)
-    return returns
+            returns.append((prices_array[i] - prices_array[i-1]) / prices_array[i-1] * 100)
+    
+    # Ensure type safety
+    return cast(FloatList, returns)
 
-def calculate_volatility(prices: List[Price], window: int = 20) -> float:
+
+def calculate_volatility(prices: PriceList, window: int = 20) -> float:
     """
     Calculate price volatility using standard deviation of returns.
     
@@ -138,8 +341,15 @@ def calculate_volatility(prices: List[Price], window: int = 20) -> float:
         >>> calculate_volatility([100, 105, 103, 107, 110, 108, 112], window=5)
         2.3456789012345678
     """
-    if len(prices) < window:
+    if not prices or len(prices) < window:
         return 0.0
     
-    returns = pd.Series(prices).pct_change().dropna()
-    return returns.rolling(window=window).std().iloc[-1] * 100 
+    # Convert to pandas Series for efficient calculation
+    prices_series = pd.Series(prices)
+    returns = prices_series.pct_change().dropna()
+    
+    # Calculate rolling standard deviation and get the last value
+    volatility = returns.rolling(window=window).std().iloc[-1] * 100
+    
+    # Ensure type safety
+    return float(volatility) 
