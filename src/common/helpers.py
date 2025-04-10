@@ -53,7 +53,7 @@ def calculate_returns(prices: List[float]) -> List[float]:
         returns.append((prices[i] - prices[i-1]) / prices[i-1] * 100)
     return returns
 
-def safe_json_loads(data: str) -> Dict[str, Any]:
+def safe_json_loads(data: Any) -> Dict[str, Any]:
     """
     Safely load JSON data with error handling.
     
