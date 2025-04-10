@@ -1,7 +1,11 @@
 from datetime import datetime
-from typing import Optional, List, Dict, Any, Type, ClassVar, TypeVar, cast
-from pydantic import BaseModel, Field, validator
+from typing import Optional, List, Dict, Any, Type, ClassVar, TypeVar, cast, Union
+from pydantic import BaseModel, Field, field_validator, ValidationInfo
 from dateutil.parser import parse
+
+# Define basic types for financial data
+Price = float
+Amount = float
 
 T = TypeVar('T', bound='TimeRange')
 
@@ -10,9 +14,10 @@ class TimeRange(BaseModel):
     start_time: datetime = Field(..., description="Start time of the range")
     end_time: datetime = Field(..., description="End time of the range")
 
-    @validator('end_time')
-    def end_time_must_be_after_start_time(cls: Any, v: datetime, values: Dict[str, Any]) -> datetime:
-        if 'start_time' in values and v <= values['start_time']:
+    @field_validator('end_time')
+    @classmethod
+    def end_time_must_be_after_start_time(cls, v: datetime, info: ValidationInfo) -> datetime:
+        if 'start_time' in info.data and v <= info.data['start_time']:
             raise ValueError('end_time must be after start_time')
         return v
 
